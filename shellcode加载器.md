@@ -1400,7 +1400,7 @@ pNtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)FileImage + pDosHeaders->e_lfanew); //�
 //获取挂起进程的上下文
 GetThreadContext(pi.hThread, &ctx); 
   
-//获取可执行
+//获取可执行映像的基址
 #ifdef _WIN64
     ReadProcessMemory(pi.hProcess, (PVOID)(ctx.Rdx + (sizeof(SIZE_T) * 2)), &RemoteImageBase, sizeof(PVOID), NULL);
     // 从rbx寄存器中获取PEB地址，并从PEB中读取可执行映像的基址
