@@ -708,7 +708,9 @@ SEH（Structured Exception Handling，结构化异常处理）是Windows操作�
 
 SEH的工作原理是在程序中建立一个异常处理函数链。每个异常处理函数都负责处理特定的异常。当程序运行时遇到异常，操作系统会沿着异常处理函数链寻找适当的处理函数。如果找到合适的异常处理函数，系统将调用该函数并处理异常。如果没有找到合适的处理函数，系统将终止程序
 
-![img](shellcode加载器/assets%2F-M3GuIlaAXU8NbJTCRei%2F-M7u7TrzN0Wym0qmjjSg%2F-M7u9bFpgHXC3vjN9d5g%2Fimage.png)
+
+
+![image-20240215165923897](shellcode加载器/image-20240215165923897.png)	
 
 
 
