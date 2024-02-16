@@ -426,6 +426,175 @@ int main() {
 
 
 
+# IAT HOOK
+
+## 简介
+
+**IAT表**：全称Import Address Table，中文名为导入地址表
+
+每一个进程都有这样一个IAT表，而这个IAT表存储着当前这个模块所用到的所有api函数地址
+
+将程序拖入OD里，随便找一个调用系统api的函数，然后数据跟随内存地址，会发现这些api函数在IAT表里的位置都是挨在一起的
+
+只要将这些函数的地址修改成指向我们自行设置的函数地址，就能实现所谓的IAT Hook
+
+![image-20220801095939727](Hook攻防/image-20220801095939727.png)	
+
+
+
+## DLL代码
+
+```c++
+// dllmain.cpp : 定义 DLL 应用程序的入口点。"
+#include <windows.h>
+
+
+//创建与Messagebox相同的函数指针,注意要设置相同的函数参数
+typedef int (WINAPI *PfnMsgA)(
+	_In_opt_ HWND hWnd,
+	_In_opt_ LPCSTR lpText,
+	_In_opt_ LPCSTR lpCaption,
+	_In_ UINT uType);
+
+PfnMsgA g_OldPfnMsgA = nullptr;  //定义一个指向原先messagebox函数的空指针(nullptr)
+
+
+//解析PE文件结构
+HMODULE hModImageBase = GetModuleHandle(NULL); //获取当前的ImagBase(基址)
+PIMAGE_DOS_HEADER pDosHead = (PIMAGE_DOS_HEADER)(DWORD)hModImageBase; //获取DOS头
+DWORD dwTemp = (DWORD)pDosHead + (DWORD)pDosHead->e_lfanew;
+PIMAGE_NT_HEADERS pNtHead = (PIMAGE_NT_HEADERS)dwTemp;  //获取NT头
+PIMAGE_FILE_HEADER pFileHead = (PIMAGE_FILE_HEADER)& pNtHead->FileHeader;  //获取标准PE头
+PIMAGE_OPTIONAL_HEADER pOptHead = (PIMAGE_OPTIONAL_HEADER)& pNtHead->OptionalHeader;  //获取扩展PE头
+DWORD dwImportLocal = pOptHead->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress; //找到导入表的偏移(RVA)
+PIMAGE_IMPORT_DESCRIPTOR   pImport = (PIMAGE_IMPORT_DESCRIPTOR)((DWORD)GetModuleHandle(NULL) + dwExportLocal);  //获取导入表
+
+
+//定义自己设置的Messagebox函数
+int WINAPI MyMessageBox(_In_opt_ HWND hWnd, _In_opt_ LPCSTR lpText, _In_opt_ LPCSTR lpCaption, _In_ UINT uType)
+{
+
+	char szHookText[] = "Hook成功";  
+	if (g_OldPfnMsgA != nullptr)
+	{
+		return g_OldPfnMsgA(hWnd, szHookText, lpCaption, uType);//调用以前的
+	}
+	return 0;
+}
+
+//设置IATHook
+void SetIatHook()
+{
+	MessageBoxA(NULL, "开始进行HOOK", NULL, NULL);
+	PVOID pHookAddress = nullptr;  //定义一个指向hook地址的空指针
+	pHookAddress = GetProcAddress(GetModuleHandleA("user32.dll"), "MessageBoxA"); //将要hook的地址指向Messagebox函数
+	
+	if (nullptr == pHookAddress)  
+	{
+		OutputDebugString(TEXT("获取函数地址失败"));   
+		MessageBoxA(NULL, "获取函数地址失败HOOK", NULL, NULL);
+
+		return;
+	}
+
+	g_OldPfnMsgA = (PfnMsgA)pHookAddress; //指向旧函数的指针.  
+	
+	
+
+	//寻找IAT表的位置.
+	
+	PIMAGE_IMPORT_DESCRIPTOR pCurrent = pImport;   
+	DWORD *pFirstThunk; //导入表子表,也就是IAT存储函数地址的表.
+	
+	//遍历导入表
+	while (pCurrent->Characteristics && pCurrent->FirstThunk != NULL)
+	{
+		dwTemp = pCurrent->FirstThunk + (DWORD)GetModuleHandle(NULL);//找到IAT表的偏移地址
+		pFirstThunk = (DWORD *)dwTemp; //指向IAT表的指针
+		while (*pFirstThunk != NULL)
+		{	
+			//遍历IAT表里的子表,若指针指向的是就函数的地址,则将其修改成我们的函数地址
+			if (*pFirstThunk == (DWORD)g_OldPfnMsgA)
+			{	
+				DWORD oldProtected;
+				VirtualProtect(pFirstThunk, 0x1000, PAGE_EXECUTE_READWRITE, &oldProtected); //设置该内存区域属性为可写可读可执行
+				dwTemp = (DWORD)MyMessageBox;
+				memcpy(pFirstThunk, (DWORD *)&dwTemp, 4); //将旧函数地址修改成自己的函数地址
+				VirtualProtect(pFirstThunk, 0x1000, oldProtected, &oldProtected);
+			}
+			pFirstThunk++; //遍历IAT表
+		}
+		pCurrent++; //遍历导入表
+	}
+
+}
+
+
+//恢复导入表
+void UnIatHook()
+{
+	MessageBoxA(NULL, "开始进行HOOK", NULL, NULL);
+	PVOID pHookAddress = nullptr;
+	pHookAddress = MyMessageBox;
+	if (nullptr == pHookAddress)
+	{
+		OutputDebugString(TEXT("获取函数地址失败"));
+		MessageBoxA(NULL, "恢复函数地址失败HOOK", NULL, NULL);
+		return;
+	}
+
+	PIMAGE_IMPORT_DESCRIPTOR   pCurrent = pImport;
+	DWORD* pFirstThunk; //指向
+	
+	//遍历导入表
+	while (pCurrent->Characteristics && pCurrent->FirstThunk != NULL)
+	{
+		dwTemp = pCurrent->FirstThunk + (DWORD)GetModuleHandle(NULL);
+		pFirstThunk = (DWORD*)dwTemp; 
+		while (*pFirstThunk != NULL)
+		{
+			//遍历子表
+			if (*pFirstThunk == (DWORD)MyMessageBox) //如果是我们的函数地址.则
+			{
+				//找到要修改的导入表了，修改内存保护属性.写入我们新的函数地址.
+				DWORD oldProtected;
+				VirtualProtect(pFirstThunk, 0x1000, PAGE_EXECUTE_READWRITE, &oldProtected);
+				dwTemp = (DWORD)GetProcAddress(GetModuleHandleA("user32.dll"), "MessageBoxA");
+				memcpy(pFirstThunk, (DWORD*)& dwTemp, 4); //将变量中保存的函数地址拷贝到导入表中.
+				VirtualProtect(pFirstThunk, 0x1000, oldProtected, &oldProtected);
+			}
+			pFirstThunk++; //继续遍历.
+		}
+		pCurrent++; //每次是加一个导入表结构.
+	}
+
+}
+
+
+BOOL APIENTRY DllMain(HMODULE hModule,
+	DWORD  ul_reason_for_call,
+	LPVOID lpReserved
+)
+{
+	switch (ul_reason_for_call)
+	{
+	case DLL_PROCESS_ATTACH:
+		SetIatHook();
+		break;
+	case DLL_THREAD_ATTACH:
+		break;
+	case DLL_THREAD_DETACH:
+
+		break;
+	case DLL_PROCESS_DETACH:
+		break;
+	}
+	return TRUE;
+}
+```
+
+
+
 
 
 # 去除Ntdll的Hook

